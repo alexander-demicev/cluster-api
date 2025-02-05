@@ -52,6 +52,7 @@ import (
 	runtimehooksv1 "sigs.k8s.io/cluster-api/exp/runtime/hooks/api/v1alpha1"
 	"sigs.k8s.io/cluster-api/exp/runtime/server"
 	"sigs.k8s.io/cluster-api/feature"
+	"sigs.k8s.io/cluster-api/test/extension/handlers/inplaceupdate"
 	"sigs.k8s.io/cluster-api/test/extension/handlers/lifecycle"
 	"sigs.k8s.io/cluster-api/test/extension/handlers/topologymutation"
 	infrav1 "sigs.k8s.io/cluster-api/test/infrastructure/docker/api/v1beta1"
@@ -372,6 +373,18 @@ func setupLifecycleHookHandlers(mgr ctrl.Manager, runtimeExtensionWebhookServer 
 		Hook:        runtimehooksv1.BeforeClusterDelete,
 		Name:        "before-cluster-delete",
 		HandlerFunc: lifecycleExtensionHandlers.DoBeforeClusterDelete,
+	}); err != nil {
+		setupLog.Error(err, "Error adding handler")
+		os.Exit(1)
+	}
+
+	// Create InPlaceUpdateHandler for the InPlaceUpdate hook.
+	inPlaceUpdateHandler := inplaceupdate.NewInPlaceUpdateHandler(mgr.GetClient())
+
+	if err := runtimeExtensionWebhookServer.AddExtensionHandler(server.ExtensionHandler{
+		Hook:        runtimehooksv1.InPlaceUpdate,
+		Name:        "in-place-update",
+		HandlerFunc: inPlaceUpdateHandler.DoInPlaceUpdate,
 	}); err != nil {
 		setupLog.Error(err, "Error adding handler")
 		os.Exit(1)

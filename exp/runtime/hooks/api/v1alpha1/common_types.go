@@ -107,6 +107,12 @@ const (
 
 	// ResponseStatusFailure represents a failure response.
 	ResponseStatusFailure ResponseStatus = "Failure"
+
+	// ResponseStatusInProgress represents a response that indicates an ongoing operation.
+	ResponseStatusInProgress ResponseStatus = "InProgress"
+
+	// ResponseStatusDenied represents a response indicating that the request has been denied.
+	ResponseStatusDenied ResponseStatus = "Denied"
 )
 
 // CommonRetryResponse is the data structure which contains all

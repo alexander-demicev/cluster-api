@@ -61,6 +61,9 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"sigs.k8s.io/cluster-api/exp/runtime/hooks/api/v1alpha1.GeneratePatchesResponseItem":                          schema_runtime_hooks_api_v1alpha1_GeneratePatchesResponseItem(ref),
 		"sigs.k8s.io/cluster-api/exp/runtime/hooks/api/v1alpha1.GroupVersionHook":                                     schema_runtime_hooks_api_v1alpha1_GroupVersionHook(ref),
 		"sigs.k8s.io/cluster-api/exp/runtime/hooks/api/v1alpha1.HolderReference":                                      schema_runtime_hooks_api_v1alpha1_HolderReference(ref),
+		"sigs.k8s.io/cluster-api/exp/runtime/hooks/api/v1alpha1.InPlaceUpdateConfig":                                  schema_runtime_hooks_api_v1alpha1_InPlaceUpdateConfig(ref),
+		"sigs.k8s.io/cluster-api/exp/runtime/hooks/api/v1alpha1.InPlaceUpdateRequest":                                 schema_runtime_hooks_api_v1alpha1_InPlaceUpdateRequest(ref),
+		"sigs.k8s.io/cluster-api/exp/runtime/hooks/api/v1alpha1.InPlaceUpdateResponse":                                schema_runtime_hooks_api_v1alpha1_InPlaceUpdateResponse(ref),
 		"sigs.k8s.io/cluster-api/exp/runtime/hooks/api/v1alpha1.MachineBootstrapBuiltins":                             schema_runtime_hooks_api_v1alpha1_MachineBootstrapBuiltins(ref),
 		"sigs.k8s.io/cluster-api/exp/runtime/hooks/api/v1alpha1.MachineBootstrapConfigRefBuiltins":                    schema_runtime_hooks_api_v1alpha1_MachineBootstrapConfigRefBuiltins(ref),
 		"sigs.k8s.io/cluster-api/exp/runtime/hooks/api/v1alpha1.MachineDeploymentBuiltins":                            schema_runtime_hooks_api_v1alpha1_MachineDeploymentBuiltins(ref),
@@ -157,11 +160,11 @@ func schema_runtime_hooks_api_v1alpha1_AfterClusterUpgradeResponse(ref common.Re
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Failure\"` represents a failure response.\n - `\"Success\"` represents a success response.",
+							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Denied\"` represents a response indicating that the request has been denied.\n - `\"Failure\"` represents a failure response.\n - `\"InProgress\"` represents a response that indicates an ongoing operation.\n - `\"Success\"` represents a success response.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Failure", "Success"},
+							Enum:        []interface{}{"Denied", "Failure", "InProgress", "Success"},
 						},
 					},
 					"message": {
@@ -255,11 +258,11 @@ func schema_runtime_hooks_api_v1alpha1_AfterControlPlaneInitializedResponse(ref 
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Failure\"` represents a failure response.\n - `\"Success\"` represents a success response.",
+							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Denied\"` represents a response indicating that the request has been denied.\n - `\"Failure\"` represents a failure response.\n - `\"InProgress\"` represents a response that indicates an ongoing operation.\n - `\"Success\"` represents a success response.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Failure", "Success"},
+							Enum:        []interface{}{"Denied", "Failure", "InProgress", "Success"},
 						},
 					},
 					"message": {
@@ -361,11 +364,11 @@ func schema_runtime_hooks_api_v1alpha1_AfterControlPlaneUpgradeResponse(ref comm
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Failure\"` represents a failure response.\n - `\"Success\"` represents a success response.",
+							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Denied\"` represents a response indicating that the request has been denied.\n - `\"Failure\"` represents a failure response.\n - `\"InProgress\"` represents a response that indicates an ongoing operation.\n - `\"Success\"` represents a success response.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Failure", "Success"},
+							Enum:        []interface{}{"Denied", "Failure", "InProgress", "Success"},
 						},
 					},
 					"message": {
@@ -467,11 +470,11 @@ func schema_runtime_hooks_api_v1alpha1_BeforeClusterCreateResponse(ref common.Re
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Failure\"` represents a failure response.\n - `\"Success\"` represents a success response.",
+							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Denied\"` represents a response indicating that the request has been denied.\n - `\"Failure\"` represents a failure response.\n - `\"InProgress\"` represents a response that indicates an ongoing operation.\n - `\"Success\"` represents a success response.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Failure", "Success"},
+							Enum:        []interface{}{"Denied", "Failure", "InProgress", "Success"},
 						},
 					},
 					"message": {
@@ -573,11 +576,11 @@ func schema_runtime_hooks_api_v1alpha1_BeforeClusterDeleteResponse(ref common.Re
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Failure\"` represents a failure response.\n - `\"Success\"` represents a success response.",
+							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Denied\"` represents a response indicating that the request has been denied.\n - `\"Failure\"` represents a failure response.\n - `\"InProgress\"` represents a response that indicates an ongoing operation.\n - `\"Success\"` represents a success response.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Failure", "Success"},
+							Enum:        []interface{}{"Denied", "Failure", "InProgress", "Success"},
 						},
 					},
 					"message": {
@@ -695,11 +698,11 @@ func schema_runtime_hooks_api_v1alpha1_BeforeClusterUpgradeResponse(ref common.R
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Failure\"` represents a failure response.\n - `\"Success\"` represents a success response.",
+							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Denied\"` represents a response indicating that the request has been denied.\n - `\"Failure\"` represents a failure response.\n - `\"InProgress\"` represents a response that indicates an ongoing operation.\n - `\"Success\"` represents a success response.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Failure", "Success"},
+							Enum:        []interface{}{"Denied", "Failure", "InProgress", "Success"},
 						},
 					},
 					"message": {
@@ -930,11 +933,11 @@ func schema_runtime_hooks_api_v1alpha1_CommonResponse(ref common.ReferenceCallba
 				Properties: map[string]spec.Schema{
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Failure\"` represents a failure response.\n - `\"Success\"` represents a success response.",
+							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Denied\"` represents a response indicating that the request has been denied.\n - `\"Failure\"` represents a failure response.\n - `\"InProgress\"` represents a response that indicates an ongoing operation.\n - `\"Success\"` represents a success response.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Failure", "Success"},
+							Enum:        []interface{}{"Denied", "Failure", "InProgress", "Success"},
 						},
 					},
 					"message": {
@@ -961,11 +964,11 @@ func schema_runtime_hooks_api_v1alpha1_CommonRetryResponse(ref common.ReferenceC
 				Properties: map[string]spec.Schema{
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Failure\"` represents a failure response.\n - `\"Success\"` represents a success response.",
+							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Denied\"` represents a response indicating that the request has been denied.\n - `\"Failure\"` represents a failure response.\n - `\"InProgress\"` represents a response that indicates an ongoing operation.\n - `\"Success\"` represents a success response.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Failure", "Success"},
+							Enum:        []interface{}{"Denied", "Failure", "InProgress", "Success"},
 						},
 					},
 					"message": {
@@ -1147,11 +1150,11 @@ func schema_runtime_hooks_api_v1alpha1_DiscoverVariablesResponse(ref common.Refe
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Failure\"` represents a failure response.\n - `\"Success\"` represents a success response.",
+							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Denied\"` represents a response indicating that the request has been denied.\n - `\"Failure\"` represents a failure response.\n - `\"InProgress\"` represents a response that indicates an ongoing operation.\n - `\"Success\"` represents a success response.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Failure", "Success"},
+							Enum:        []interface{}{"Denied", "Failure", "InProgress", "Success"},
 						},
 					},
 					"message": {
@@ -1235,11 +1238,11 @@ func schema_runtime_hooks_api_v1alpha1_DiscoveryResponse(ref common.ReferenceCal
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Failure\"` represents a failure response.\n - `\"Success\"` represents a success response.",
+							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Denied\"` represents a response indicating that the request has been denied.\n - `\"Failure\"` represents a failure response.\n - `\"InProgress\"` represents a response that indicates an ongoing operation.\n - `\"Success\"` represents a success response.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Failure", "Success"},
+							Enum:        []interface{}{"Denied", "Failure", "InProgress", "Success"},
 						},
 					},
 					"message": {
@@ -1474,11 +1477,11 @@ func schema_runtime_hooks_api_v1alpha1_GeneratePatchesResponse(ref common.Refere
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Failure\"` represents a failure response.\n - `\"Success\"` represents a success response.",
+							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Denied\"` represents a response indicating that the request has been denied.\n - `\"Failure\"` represents a failure response.\n - `\"InProgress\"` represents a response that indicates an ongoing operation.\n - `\"Success\"` represents a success response.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Failure", "Success"},
+							Enum:        []interface{}{"Denied", "Failure", "InProgress", "Success"},
 						},
 					},
 					"message": {
@@ -1629,6 +1632,113 @@ func schema_runtime_hooks_api_v1alpha1_HolderReference(ref common.ReferenceCallb
 					},
 				},
 				Required: []string{"apiVersion", "kind", "namespace", "name", "fieldPath"},
+			},
+		},
+	}
+}
+
+func schema_runtime_hooks_api_v1alpha1_InPlaceUpdateConfig(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InPlaceUpdateConfig defines the parameters for an in-place update.",
+				Type:        []string{"object"},
+			},
+		},
+	}
+}
+
+func schema_runtime_hooks_api_v1alpha1_InPlaceUpdateRequest(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InPlaceUpdateRequest is the request for the InPlaceUpdate hook.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"currentMachine": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CurrentMachine represents the current state of the machine undergoing in-place update.",
+							Default:     map[string]interface{}{},
+							Ref:         ref("sigs.k8s.io/cluster-api/api/v1beta1.Machine"),
+						},
+					},
+					"desiredMachine": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DesiredMachine represents the desired state of the machine after the update.",
+							Default:     map[string]interface{}{},
+							Ref:         ref("sigs.k8s.io/cluster-api/api/v1beta1.Machine"),
+						},
+					},
+					"updateConfig": {
+						SchemaProps: spec.SchemaProps{
+							Description: "UpdateConfig contains configuration for the in-place update.",
+							Default:     map[string]interface{}{},
+							Ref:         ref("sigs.k8s.io/cluster-api/exp/runtime/hooks/api/v1alpha1.InPlaceUpdateConfig"),
+						},
+					},
+				},
+				Required: []string{"currentMachine", "desiredMachine", "updateConfig"},
+			},
+		},
+		Dependencies: []string{
+			"sigs.k8s.io/cluster-api/api/v1beta1.Machine", "sigs.k8s.io/cluster-api/exp/runtime/hooks/api/v1alpha1.InPlaceUpdateConfig"},
+	}
+}
+
+func schema_runtime_hooks_api_v1alpha1_InPlaceUpdateResponse(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InPlaceUpdateResponse is the response of the InPlaceUpdate hook.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Denied\"` represents a response indicating that the request has been denied.\n - `\"Failure\"` represents a failure response.\n - `\"InProgress\"` represents a response that indicates an ongoing operation.\n - `\"Success\"` represents a success response.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Denied", "Failure", "InProgress", "Success"},
+						},
+					},
+					"message": {
+						SchemaProps: spec.SchemaProps{
+							Description: "message is a human-readable description of the status of the call.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"status", "message"},
 			},
 		},
 	}
@@ -1970,11 +2080,11 @@ func schema_runtime_hooks_api_v1alpha1_ValidateTopologyResponse(ref common.Refer
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Failure\"` represents a failure response.\n - `\"Success\"` represents a success response.",
+							Description: "status of the call. One of \"Success\" or \"Failure\".\n\nPossible enum values:\n - `\"Denied\"` represents a response indicating that the request has been denied.\n - `\"Failure\"` represents a failure response.\n - `\"InProgress\"` represents a response that indicates an ongoing operation.\n - `\"Success\"` represents a success response.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
-							Enum:        []interface{}{"Failure", "Success"},
+							Enum:        []interface{}{"Denied", "Failure", "InProgress", "Success"},
 						},
 					},
 					"message": {
