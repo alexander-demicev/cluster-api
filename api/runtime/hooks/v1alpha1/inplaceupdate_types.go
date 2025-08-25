@@ -45,12 +45,9 @@ type CanUpdateMachineResponse struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// CommonResponse contains Status and Message fields common to all response types.
+	// Extensions should include accepted changes directly in the Message field as comma-separated values:
+	// "change1,change2,change3" or empty string if no changes can be handled.
 	CommonResponse `json:",inline"`
-
-	// acceptedChanges is the subset of requested changes that this extension can handle.
-	// If empty, the extension cannot handle any of the requested changes.
-	// +optional
-	AcceptedChanges []string `json:"acceptedChanges,omitempty"`
 }
 
 // CanUpdateMachine is the hook that will be called to determine if an extension
@@ -109,6 +106,11 @@ func init() {
 		Summary: "Cluster API Runtime will call this hook to determine if an extension can handle specific machine changes",
 		Description: "Called during update planning to determine if an extension can handle machine changes. " +
 			"The extension should respond with the subset of changes it can handle for in-place updates.\n" +
+			"\n" +
+			"Response Communication:\n" +
+			"- Include accepted changes directly in Message field as comma-separated values\n" +
+			"- Example: 'machine.spec.version,infraMachine.spec.memoryMiB'\n" +
+			"- If no changes can be handled, set Message to empty string\n" +
 			"\n" +
 			"Notes:\n" +
 			"- This hook is called during the planning phase of updates\n" +

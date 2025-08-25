@@ -860,21 +860,6 @@ func schema_api_runtime_hooks_v1alpha1_CanUpdateMachineResponse(ref common.Refer
 							Format:      "",
 						},
 					},
-					"acceptedChanges": {
-						SchemaProps: spec.SchemaProps{
-							Description: "acceptedChanges is the subset of requested changes that this extension can handle. If empty, the extension cannot handle any of the requested changes.",
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: "",
-										Type:    []string{"string"},
-										Format:  "",
-									},
-								},
-							},
-						},
-					},
 				},
 				Required: []string{"status"},
 			},

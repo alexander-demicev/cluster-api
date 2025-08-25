@@ -56,16 +56,23 @@ import (
 	controlplanev1beta1 "sigs.k8s.io/cluster-api/api/controlplane/kubeadm/v1beta1"
 	controlplanev1 "sigs.k8s.io/cluster-api/api/controlplane/kubeadm/v1beta2"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	runtimehooksv1 "sigs.k8s.io/cluster-api/api/runtime/hooks/v1alpha1"
+	runtimev1 "sigs.k8s.io/cluster-api/api/runtime/v1beta2"
 	"sigs.k8s.io/cluster-api/controllers/clustercache"
 	"sigs.k8s.io/cluster-api/controllers/crdmigrator"
 	"sigs.k8s.io/cluster-api/controllers/remote"
 	kubeadmcontrolplanecontrollers "sigs.k8s.io/cluster-api/controlplane/kubeadm/controllers"
 	"sigs.k8s.io/cluster-api/controlplane/kubeadm/internal/etcd"
 	kcpwebhooks "sigs.k8s.io/cluster-api/controlplane/kubeadm/webhooks"
+	runtimecatalog "sigs.k8s.io/cluster-api/exp/runtime/catalog"
+	runtimeclient "sigs.k8s.io/cluster-api/exp/runtime/client"
+	runtimecontrollers "sigs.k8s.io/cluster-api/exp/runtime/controllers"
 	"sigs.k8s.io/cluster-api/feature"
 	controlplanev1alpha3 "sigs.k8s.io/cluster-api/internal/api/controlplane/kubeadm/v1alpha3"
 	controlplanev1alpha4 "sigs.k8s.io/cluster-api/internal/api/controlplane/kubeadm/v1alpha4"
 	"sigs.k8s.io/cluster-api/internal/contract"
+	internalruntimeclient "sigs.k8s.io/cluster-api/internal/runtime/client"
+	runtimeregistry "sigs.k8s.io/cluster-api/internal/runtime/registry"
 	"sigs.k8s.io/cluster-api/util/apiwarnings"
 	"sigs.k8s.io/cluster-api/util/flags"
 	"sigs.k8s.io/cluster-api/version"
@@ -105,6 +112,8 @@ var (
 	etcdDialTimeout                time.Duration
 	etcdCallTimeout                time.Duration
 	etcdLogLevel                   string
+	catalog                        = runtimecatalog.New()
+	extensionConfigConcurrency     int
 )
 
 func init() {
@@ -116,6 +125,8 @@ func init() {
 	_ = controlplanev1.AddToScheme(scheme)
 	_ = bootstrapv1.AddToScheme(scheme)
 	_ = apiextensionsv1.AddToScheme(scheme)
+	_ = runtimev1.AddToScheme(scheme)
+	_ = runtimehooksv1.AddToCatalog(catalog)
 }
 
 // InitFlags initializes the flags.
@@ -197,6 +208,9 @@ func InitFlags(fs *pflag.FlagSet) {
 
 	fs.StringVar(&etcdLogLevel, "etcd-client-log-level", zapcore.InfoLevel.String(),
 		"Logging level for etcd client. Possible values are: debug, info, warn, error, dpanic, panic, fatal.")
+
+	fs.IntVar(&extensionConfigConcurrency, "extensionconfig-concurrency", 10,
+		"Number of extension configs to process simultaneously")
 
 	flags.AddManagerOptions(fs, &managerOptions)
 
@@ -326,7 +340,7 @@ func main() {
 	ctx := ctrl.SetupSignalHandler()
 
 	setupChecks(mgr)
-	setupReconcilers(ctx, mgr)
+	setupReconcilers(ctx, mgr, watchNamespaces, &syncPeriod)
 	setupWebhooks(ctx, mgr)
 
 	setupLog.Info("Starting manager", "version", version.Get().String())
@@ -348,7 +362,7 @@ func setupChecks(mgr ctrl.Manager) {
 	}
 }
 
-func setupReconcilers(ctx context.Context, mgr ctrl.Manager) {
+func setupReconcilers(ctx context.Context, mgr ctrl.Manager, watchNamespaces map[string]cache.Config, syncPeriod *time.Duration) {
 	secretCachingClient, err := client.New(mgr.GetConfig(), client.Options{
 		HTTPClient: mgr.GetHTTPClient(),
 		Cache: &client.CacheOptions{
@@ -436,8 +450,55 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager) {
 		setupLog.Error(err, "unable to create etcd logger")
 		os.Exit(1)
 	}
+
+	var runtimeClient runtimeclient.Client
+	if feature.Gates.Enabled(feature.InPlaceUpdates) {
+		partialSecretCache, err := cache.New(mgr.GetConfig(), cache.Options{
+			Scheme:            mgr.GetScheme(),
+			Mapper:            mgr.GetRESTMapper(),
+			HTTPClient:        mgr.GetHTTPClient(),
+			SyncPeriod:        syncPeriod,
+			DefaultNamespaces: watchNamespaces,
+			DefaultTransform: func(in interface{}) (interface{}, error) {
+				obj, ok := in.(*metav1.PartialObjectMetadata)
+				if !ok {
+					panic(fmt.Sprintf("cache expected to only get PartialObjectMetadata, got %T", in))
+				}
+				if obj.GetObjectKind().GroupVersionKind() != corev1.SchemeGroupVersion.WithKind("Secret") {
+					panic(fmt.Sprintf("cache expected to only get Secrets, got %s", obj.GetObjectKind()))
+				}
+				return cache.TransformStripManagedFields()(obj)
+			},
+		})
+		if err != nil {
+			setupLog.Error(err, "Failed to create cache for metadata only Secret watches")
+			os.Exit(1)
+		}
+		if err := mgr.Add(partialSecretCache); err != nil {
+			setupLog.Error(err, "Failed to start cache for metadata only Secret watches")
+			os.Exit(1)
+		}
+
+		runtimeClient = internalruntimeclient.New(internalruntimeclient.Options{
+			Catalog:  catalog,
+			Registry: runtimeregistry.New(),
+			Client:   mgr.GetClient(),
+		})
+
+		if err = (&runtimecontrollers.ExtensionConfigReconciler{
+			Client:           mgr.GetClient(),
+			APIReader:        mgr.GetAPIReader(),
+			RuntimeClient:    runtimeClient,
+			WatchFilterValue: watchFilterValue,
+		}).SetupWithManager(ctx, mgr, concurrency(extensionConfigConcurrency), partialSecretCache); err != nil {
+			setupLog.Error(err, "Unable to create controller", "controller", "ExtensionConfig")
+			os.Exit(1)
+		}
+	}
+
 	if err := (&kubeadmcontrolplanecontrollers.KubeadmControlPlaneReconciler{
 		Client:                      mgr.GetClient(),
+		APIReader:                   mgr.GetAPIReader(),
 		SecretCachingClient:         secretCachingClient,
 		ClusterCache:                clusterCache,
 		WatchFilterValue:            watchFilterValue,
@@ -445,6 +506,7 @@ func setupReconcilers(ctx context.Context, mgr ctrl.Manager) {
 		EtcdCallTimeout:             etcdCallTimeout,
 		EtcdLogger:                  etcdLogger,
 		RemoteConditionsGracePeriod: remoteConditionsGracePeriod,
+		RuntimeClient:               runtimeClient,
 	}).SetupWithManager(ctx, mgr, concurrency(kubeadmControlPlaneConcurrency)); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "KubeadmControlPlane")
 		os.Exit(1)

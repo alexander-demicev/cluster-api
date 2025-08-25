@@ -81,6 +81,9 @@ type MachineReconciler struct {
 
 	AdditionalSyncMachineLabels      []*regexp.Regexp
 	AdditionalSyncMachineAnnotations []*regexp.Regexp
+
+	// RuntimeClient is a client for calling runtime extensions.
+	RuntimeClient runtimeclient.Client
 }
 
 func (r *MachineReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
@@ -92,6 +95,7 @@ func (r *MachineReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manag
 		RemoteConditionsGracePeriod:      r.RemoteConditionsGracePeriod,
 		AdditionalSyncMachineLabels:      r.AdditionalSyncMachineLabels,
 		AdditionalSyncMachineAnnotations: r.AdditionalSyncMachineAnnotations,
+		RuntimeClient:                    r.RuntimeClient,
 	}).SetupWithManager(ctx, mgr, options)
 }
 
@@ -119,8 +123,9 @@ func (r *MachineSetReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Ma
 
 // MachineDeploymentReconciler reconciles a MachineDeployment object.
 type MachineDeploymentReconciler struct {
-	Client    client.Client
-	APIReader client.Reader
+	Client        client.Client
+	APIReader     client.Reader
+	RuntimeClient runtimeclient.Client
 
 	// WatchFilterValue is the label value used to filter events prior to reconciliation.
 	WatchFilterValue string
@@ -131,6 +136,7 @@ func (r *MachineDeploymentReconciler) SetupWithManager(ctx context.Context, mgr 
 		Client:           r.Client,
 		APIReader:        r.APIReader,
 		WatchFilterValue: r.WatchFilterValue,
+		RuntimeClient:    r.RuntimeClient,
 	}).SetupWithManager(ctx, mgr, options)
 }
 
