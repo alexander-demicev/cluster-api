@@ -19,6 +19,7 @@ package machine
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -33,9 +34,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	runtimehooksv1 "sigs.k8s.io/cluster-api/api/runtime/hooks/v1alpha1"
 	"sigs.k8s.io/cluster-api/controllers/external"
 	capierrors "sigs.k8s.io/cluster-api/errors"
+	"sigs.k8s.io/cluster-api/feature"
 	"sigs.k8s.io/cluster-api/internal/contract"
+	"sigs.k8s.io/cluster-api/internal/hooks"
 	"sigs.k8s.io/cluster-api/util"
 	v1beta1conditions "sigs.k8s.io/cluster-api/util/conditions/deprecated/v1beta1"
 	"sigs.k8s.io/cluster-api/util/patch"
@@ -446,4 +450,137 @@ func getControlPlaneGKForMachine(cluster *clusterv1.Cluster, machine *clusterv1.
 		}
 	}
 	return nil
+}
+
+// reconcileInPlaceUpdate handles in-place updates for machines when the feature is enabled.
+// This function runs between infrastructure reconciliation and node reconciliation to ensure
+// the infrastructure is ready before attempting updates.
+//
+// Note: The decision to use in-place updates should have already been made by the CP/MD controllers
+// using the CanUpdateMachine hook. This function only executes the UpdateMachine hooks.
+// The UpToDate condition is managed entirely by the owner controller (KCP/MD).
+func (r *Reconciler) reconcileInPlaceUpdate(ctx context.Context, s *scope) (ctrl.Result, error) {
+	log := ctrl.LoggerFrom(ctx)
+	m := s.machine
+
+	// Skip if the feature gate is disabled
+	if !feature.Gates.Enabled(feature.InPlaceUpdates) {
+		log.V(5).Info("InPlaceUpdates feature gate is disabled, skipping in-place update logic")
+		return ctrl.Result{}, nil
+	}
+
+	// Skip if machine is being deleted
+	if !m.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, nil
+	}
+
+	// Skip if infrastructure is not provisioned yet
+	if !ptr.Deref(m.Status.Initialization.InfrastructureProvisioned, false) {
+		log.V(5).Info("Infrastructure not yet provisioned, skipping in-place update logic")
+		return ctrl.Result{}, nil
+	}
+
+	// Skip if bootstrap is not ready yet
+	if !ptr.Deref(m.Status.Initialization.BootstrapDataSecretCreated, false) {
+		log.V(5).Info("Bootstrap data secret not yet created, skipping in-place update logic")
+		return ctrl.Result{}, nil
+	}
+
+	// Check if this machine is marked for in-place update by CP/MD controller
+	// This is indicated by the presence of "ExternalUpdate" in the pending-hooks annotation
+	if !hooks.IsPending(runtimehooksv1.ExternalUpdate, m) {
+		log.V(5).Info("Machine not marked for in-place update, skipping UpdateMachine hooks")
+		return ctrl.Result{}, nil
+	}
+
+	// Note: UpToDate condition is managed entirely by the owner controller (KCP/MD)
+	// This controller only handles the hook execution and lifecycle
+
+	// Create the UpdateMachine hook request
+	// Read the changes from the annotation that was set when marking for external update
+	var changes []string
+	if changesStr, exists := m.Annotations[clusterv1.ExternalUpdateChangesAnnotation]; exists && changesStr != "" {
+		changes = strings.Split(changesStr, ",")
+	}
+
+	// Log the changes being processed for debugging
+	log.V(4).Info("Processing UpdateMachine hook with changes from annotation", "changes", changes)
+
+	updateRequest := &runtimehooksv1.UpdateMachineRequest{
+		MachineRef: runtimehooksv1.ObjectReference{
+			Name:      m.Name,
+			Namespace: m.Namespace,
+		},
+	}
+
+	// Call the UpdateMachine hooks through the runtime client
+	if result, err := r.callUpdateMachineHooks(ctx, s, updateRequest); err != nil {
+		log.Error(err, "UpdateMachine hook execution failed")
+		return ctrl.Result{}, err
+	} else if !result.IsZero() {
+		// Hook is still in progress, requeue to check later
+		return result, nil
+	}
+
+	// Hook completed successfully, mark as done to remove from pending hooks
+	if err := hooks.MarkAsDone(ctx, r.Client, m, runtimehooksv1.ExternalUpdate); err != nil {
+		log.Error(err, "Failed to mark ExternalUpdate hook as done")
+		return ctrl.Result{}, err
+	}
+
+	// Clean up the changes annotation since the external update is complete
+	// The machine will be patched at the end of reconcile, so we just modify in memory
+	if m.Annotations != nil {
+		if _, exists := m.Annotations[clusterv1.ExternalUpdateChangesAnnotation]; exists {
+			delete(m.Annotations, clusterv1.ExternalUpdateChangesAnnotation)
+			log.V(4).Info("Cleaned up ExternalUpdateChanges annotation", "machine", m.Name)
+		}
+	}
+
+	log.Info("External update completed successfully, marked ExternalUpdate hook as done", "machine", m.Name)
+	return ctrl.Result{}, nil
+}
+
+// callUpdateMachineHooks calls all relevant UpdateMachine hooks
+// Returns a requeue result if the update is in progress
+func (r *Reconciler) callUpdateMachineHooks(ctx context.Context, s *scope, request *runtimehooksv1.UpdateMachineRequest) (ctrl.Result, error) {
+	log := ctrl.LoggerFrom(ctx)
+
+	// Check if RuntimeClient is available (it might not be configured in all environments)
+	if r.RuntimeClient == nil {
+		log.V(5).Info("RuntimeClient not configured, skipping UpdateMachine hooks")
+		return ctrl.Result{}, nil
+	}
+
+	log.Info("Executing UpdateMachine hooks with RuntimeClient", "machine", klog.KRef(request.MachineRef.Namespace, request.MachineRef.Name))
+
+	// Call all registered extensions that can handle UpdateMachine hooks
+	// This uses the same pattern as KCP controller for extension discovery
+	updateResponse := &runtimehooksv1.UpdateMachineResponse{}
+	if err := r.RuntimeClient.CallAllExtensions(ctx, runtimehooksv1.UpdateMachine, s.machine, request, updateResponse); err != nil {
+		log.Error(err, "Failed to call UpdateMachine hooks")
+		return ctrl.Result{}, errors.Wrap(err, "failed to call UpdateMachine hooks")
+	}
+
+	// Process the response from the UpdateMachine hooks
+	switch updateResponse.GetStatus() {
+	case runtimehooksv1.ResponseStatusSuccess:
+		if updateResponse.GetRetryAfterSeconds() > 0 {
+			// Update is still in progress, requeue after the specified duration
+			requeueAfter := time.Duration(updateResponse.GetRetryAfterSeconds()) * time.Second
+			log.V(4).Info("UpdateMachine hooks still in progress, requeuing", "retryAfterSeconds", updateResponse.GetRetryAfterSeconds())
+			return ctrl.Result{RequeueAfter: requeueAfter}, nil
+		}
+		// Update completed successfully
+		log.Info("UpdateMachine hooks completed successfully")
+		return ctrl.Result{}, nil
+
+	case runtimehooksv1.ResponseStatusFailure:
+		log.Error(nil, "UpdateMachine hooks failed", "message", updateResponse.GetMessage())
+		return ctrl.Result{}, errors.Errorf("UpdateMachine hooks failed: %s", updateResponse.GetMessage())
+
+	default:
+		log.Error(nil, "UpdateMachine hooks returned unknown status", "status", updateResponse.GetStatus())
+		return ctrl.Result{}, errors.Errorf("UpdateMachine hooks returned unknown status: %s", updateResponse.GetStatus())
+	}
 }

@@ -27,11 +27,14 @@ import (
 
 	"sigs.k8s.io/cluster-api/controllers/clustercache"
 	kubeadmcontrolplanecontrollers "sigs.k8s.io/cluster-api/controlplane/kubeadm/internal/controllers"
+	runtimeclient "sigs.k8s.io/cluster-api/exp/runtime/client"
 )
 
 // KubeadmControlPlaneReconciler reconciles a KubeadmControlPlane object.
 type KubeadmControlPlaneReconciler struct {
 	Client              client.Client
+	APIReader           client.Reader
+	RuntimeClient       runtimeclient.Client
 	SecretCachingClient client.Client
 	ClusterCache        clustercache.ClusterCache
 
@@ -49,6 +52,7 @@ type KubeadmControlPlaneReconciler struct {
 func (r *KubeadmControlPlaneReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
 	return (&kubeadmcontrolplanecontrollers.KubeadmControlPlaneReconciler{
 		Client:                      r.Client,
+		APIReader:                   r.APIReader,
 		SecretCachingClient:         r.SecretCachingClient,
 		ClusterCache:                r.ClusterCache,
 		EtcdDialTimeout:             r.EtcdDialTimeout,
@@ -56,5 +60,6 @@ func (r *KubeadmControlPlaneReconciler) SetupWithManager(ctx context.Context, mg
 		EtcdLogger:                  r.EtcdLogger,
 		WatchFilterValue:            r.WatchFilterValue,
 		RemoteConditionsGracePeriod: r.RemoteConditionsGracePeriod,
+		RuntimeClient:               r.RuntimeClient,
 	}).SetupWithManager(ctx, mgr, options)
 }

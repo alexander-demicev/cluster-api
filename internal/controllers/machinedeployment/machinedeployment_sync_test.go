@@ -615,7 +615,7 @@ func TestComputeDesiredMachineSet(t *testing.T) {
 		expectedMS := skeletonMSBasedOnMD.DeepCopy()
 
 		g := NewWithT(t)
-		actualMS, err := (&Reconciler{}).computeDesiredMachineSet(ctx, deployment, nil, nil)
+		actualMS, err := (&Reconciler{}).computeDesiredMachineSet(ctx, deployment, nil, nil, false)
 		g.Expect(err).ToNot(HaveOccurred())
 		assertMachineSet(g, actualMS, expectedMS)
 	})
@@ -628,7 +628,20 @@ func TestComputeDesiredMachineSet(t *testing.T) {
 		expectedMS.Spec.Replicas = ptr.To[int32](2) // 4 (maxsurge+replicas) - 2 (replicas of old ms) = 2
 
 		g := NewWithT(t)
-		actualMS, err := (&Reconciler{}).computeDesiredMachineSet(ctx, deployment, nil, []*clusterv1.MachineSet{oldMS})
+		actualMS, err := (&Reconciler{}).computeDesiredMachineSet(ctx, deployment, nil, []*clusterv1.MachineSet{oldMS}, false)
+		g.Expect(err).ToNot(HaveOccurred())
+		assertMachineSet(g, actualMS, expectedMS)
+	})
+
+	t.Run("should compute a new paused MachineSet when paused=true", func(t *testing.T) {
+		expectedMS := skeletonMSBasedOnMD.DeepCopy()
+		if expectedMS.Annotations == nil {
+			expectedMS.Annotations = make(map[string]string)
+		}
+		expectedMS.Annotations[clusterv1.PausedAnnotation] = "external-update-in-progress"
+
+		g := NewWithT(t)
+		actualMS, err := (&Reconciler{}).computeDesiredMachineSet(ctx, deployment, nil, nil, true)
 		g.Expect(err).ToNot(HaveOccurred())
 		assertMachineSet(g, actualMS, expectedMS)
 	})
@@ -671,7 +684,7 @@ func TestComputeDesiredMachineSet(t *testing.T) {
 		expectedMS.Spec.Template.Labels[clusterv1.MachineDeploymentUniqueLabel] = uniqueID
 
 		g := NewWithT(t)
-		actualMS, err := (&Reconciler{}).computeDesiredMachineSet(ctx, deployment, existingMS, nil)
+		actualMS, err := (&Reconciler{}).computeDesiredMachineSet(ctx, deployment, existingMS, nil, false)
 		g.Expect(err).ToNot(HaveOccurred())
 		assertMachineSet(g, actualMS, expectedMS)
 	})
@@ -717,7 +730,7 @@ func TestComputeDesiredMachineSet(t *testing.T) {
 		expectedMS.Spec.Template.Labels[clusterv1.MachineDeploymentUniqueLabel] = uniqueID
 
 		g := NewWithT(t)
-		actualMS, err := (&Reconciler{}).computeDesiredMachineSet(ctx, deployment, existingMS, []*clusterv1.MachineSet{oldMS})
+		actualMS, err := (&Reconciler{}).computeDesiredMachineSet(ctx, deployment, existingMS, []*clusterv1.MachineSet{oldMS}, false)
 		g.Expect(err).ToNot(HaveOccurred())
 		assertMachineSet(g, actualMS, expectedMS)
 	})
@@ -763,7 +776,7 @@ func TestComputeDesiredMachineSet(t *testing.T) {
 		expectedMS.Spec.Deletion.Order = deployment.Spec.Deletion.Order
 
 		g := NewWithT(t)
-		actualMS, err := (&Reconciler{}).computeDesiredMachineSet(ctx, deployment, existingMS, nil)
+		actualMS, err := (&Reconciler{}).computeDesiredMachineSet(ctx, deployment, existingMS, nil, false)
 		g.Expect(err).ToNot(HaveOccurred())
 		assertMachineSet(g, actualMS, expectedMS)
 	})

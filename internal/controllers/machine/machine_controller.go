@@ -52,6 +52,7 @@ import (
 	"sigs.k8s.io/cluster-api/controllers/clustercache"
 	"sigs.k8s.io/cluster-api/controllers/external"
 	"sigs.k8s.io/cluster-api/controllers/noderefutil"
+	runtimeclient "sigs.k8s.io/cluster-api/exp/runtime/client"
 	"sigs.k8s.io/cluster-api/feature"
 	"sigs.k8s.io/cluster-api/internal/contract"
 	"sigs.k8s.io/cluster-api/internal/controllers/machine/drain"
@@ -99,6 +100,9 @@ type Reconciler struct {
 
 	// WatchFilterValue is the label value used to filter events prior to reconciliation.
 	WatchFilterValue string
+
+	// RuntimeClient is a client for calling runtime extensions.
+	RuntimeClient runtimeclient.Client
 
 	RemoteConditionsGracePeriod time.Duration
 
@@ -267,6 +271,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 		r.reconcileMachineOwnerAndLabels,
 		r.reconcileBootstrap,
 		r.reconcileInfrastructure,
+		r.reconcileInPlaceUpdate,
 		r.reconcileNode,
 		r.reconcileCertificateExpiry,
 	}

@@ -19,21 +19,40 @@ package machinedeployment
 import (
 	"context"
 	"sort"
+	"strings"
 
 	"github.com/pkg/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	runtimehooksv1 "sigs.k8s.io/cluster-api/api/runtime/hooks/v1alpha1"
+	"sigs.k8s.io/cluster-api/feature"
 	"sigs.k8s.io/cluster-api/internal/controllers/machinedeployment/mdutil"
+	"sigs.k8s.io/cluster-api/internal/hooks"
+	"sigs.k8s.io/cluster-api/util/annotations"
 	"sigs.k8s.io/cluster-api/util/patch"
 )
 
 // rolloutRolling implements the logic for rolling a new MachineSet.
 func (r *Reconciler) rolloutRolling(ctx context.Context, md *clusterv1.MachineDeployment, msList []*clusterv1.MachineSet, templateExists bool) error {
-	newMS, oldMSs, err := r.getAllMachineSetsAndSyncRevision(ctx, md, msList, true, templateExists)
+	log := ctrl.LoggerFrom(ctx)
+
+	useExternalUpdate := false
+	if feature.Gates.Enabled(feature.InPlaceUpdates) && len(msList) > 0 {
+		log.Info("InPlaceUpdates feature gate enabled, checking for external update capability", "existingMachineSets", len(msList))
+		canUseExternalUpdate, err := r.canMachineSetsUseExternalUpdate(ctx, msList, md.Spec.Template.Spec)
+		if err != nil {
+			log.Error(err, "Failed to check external update capability")
+			return err
+		}
+		useExternalUpdate = canUseExternalUpdate
+	}
+
+	newMS, oldMSs, err := r.getAllMachineSetsAndSyncRevision(ctx, md, msList, true, templateExists, useExternalUpdate)
 	if err != nil {
 		return err
 	}
@@ -43,6 +62,12 @@ func (r *Reconciler) rolloutRolling(ctx context.Context, md *clusterv1.MachineDe
 	// this can be nil if there are changes, but no replacement of existing machines is needed.
 	if newMS == nil {
 		return nil
+	}
+
+	if useExternalUpdate {
+		if err := r.executeExternalUpdateStrategy(ctx, oldMSs, newMS); err != nil {
+			return err
+		}
 	}
 
 	allMSs := append(oldMSs, newMS)
@@ -322,5 +347,400 @@ func (r *Reconciler) cleanupDisableMachineCreateAnnotation(ctx context.Context, 
 		}
 	}
 
+	return nil
+}
+
+// getMachinesForMachineSet returns machines for a given MachineSet.
+func (r *Reconciler) getMachinesForMachineSet(ctx context.Context, ms *clusterv1.MachineSet) ([]*clusterv1.Machine, error) {
+	selector, err := metav1.LabelSelectorAsSelector(&ms.Spec.Selector)
+	if err != nil {
+		return nil, err
+	}
+
+	machineList := &clusterv1.MachineList{}
+	if err := r.Client.List(ctx, machineList, client.InNamespace(ms.Namespace), client.MatchingLabelsSelector{Selector: selector}); err != nil {
+		return nil, err
+	}
+
+	var machines []*clusterv1.Machine
+	for i := range machineList.Items {
+		machines = append(machines, &machineList.Items[i])
+	}
+
+	return machines, nil
+}
+
+func (r *Reconciler) calculateMachineSpecChanges(currentMachine *clusterv1.Machine, newSpec clusterv1.MachineSpec) ([]string, error) {
+	var changes []string
+
+	if currentMachine.Spec.Version != newSpec.Version {
+		changes = append(changes, "machine.spec.version")
+	}
+
+	// TODO: Add more fields to compare.
+
+	return changes, nil
+}
+
+func (r *Reconciler) canMachineSetsUseExternalUpdate(ctx context.Context, machineSets []*clusterv1.MachineSet, desiredSpec clusterv1.MachineSpec) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
+	log.Info("Checking if MachineSets can use external update", "machineSets", len(machineSets))
+
+	var allMachines []*clusterv1.Machine
+	for _, ms := range machineSets {
+		machines, err := r.getMachinesForMachineSet(ctx, ms)
+		if err != nil {
+			return false, err
+		}
+		allMachines = append(allMachines, machines...)
+	}
+
+	if len(allMachines) == 0 {
+		log.Info("No machines to update in MachineSets - external update not applicable")
+		return false, nil
+	}
+
+	for _, machine := range allMachines {
+		if hooks.IsPending(runtimehooksv1.ExternalUpdate, machine) {
+			return false, errors.New("external update already in progress, waiting for completion")
+		}
+	}
+
+	changes, err := r.calculateMachineSpecChanges(allMachines[0], desiredSpec)
+	if err != nil {
+		log.Error(err, "Failed to calculate machine spec changes")
+		return false, err
+	}
+
+	if len(changes) == 0 {
+		return false, nil
+	}
+
+	log.Info("Detected changes for MachineDeployment machines", "changes", changes)
+
+	for _, machine := range allMachines {
+		canUpdate, err := r.canMachineUseExternalUpdate(ctx, machine, desiredSpec, changes)
+		if err != nil {
+			return false, err
+		}
+		if !canUpdate {
+			log.Info("Machine cannot be updated in-place, will fallback to rolling update",
+				"machine", machine.Name)
+			return false, nil
+		}
+	}
+
+	log.Info("All machines can be updated in-place using external updaters",
+		"machineCount", len(allMachines))
+	return true, nil
+}
+
+// canAllMachinesUseExternalUpdate determines if all machines in the deployment can be updated using external updaters.
+// This implements the proposal's deployment-level strategy decision for MachineDeployment.
+func (r *Reconciler) canAllMachinesUseExternalUpdate(ctx context.Context, oldMSs []*clusterv1.MachineSet, newMS *clusterv1.MachineSet) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
+
+	// Collect all machines that need to be updated
+	var allMachines []*clusterv1.Machine
+	for _, ms := range oldMSs {
+		machines, err := r.getMachinesForMachineSet(ctx, ms)
+		if err != nil {
+			return false, err
+		}
+		allMachines = append(allMachines, machines...)
+	}
+
+	if len(allMachines) == 0 {
+		log.V(4).Info("No MachineDeployment machines to update")
+		return true, nil
+	}
+
+	// Check if any machine is already pending external update
+	// If so, we should wait for it to complete, not fall back to rolling updates
+	for _, machine := range allMachines {
+		if hooks.IsPending(runtimehooksv1.ExternalUpdate, machine) {
+			log.V(4).Info("Machine is already pending external update, waiting for completion",
+				"machine", machine.Name)
+			// Return an error to requeue and wait for the external update to complete
+			// We must not fall back to rolling updates when external updates are in progress
+			return false, errors.New("external update already in progress, waiting for completion")
+		}
+	}
+
+	// Calculate the required changes by comparing old and new MachineSet specs
+	changes, err := r.calculateMachineSpecChanges(allMachines[0], newMS.Spec.Template.Spec)
+	if err != nil {
+		return false, err
+	}
+
+	if len(changes) == 0 {
+		log.V(4).Info("No changes detected between old and new machine specs")
+		return true, nil
+	}
+
+	log.V(4).Info("Detected changes for MachineDeployment machines", "changes", changes)
+
+	// Check each machine to ensure ALL can be updated in-place
+	for _, machine := range allMachines {
+		canUpdate, err := r.canMachineUseExternalUpdate(ctx, machine, newMS.Spec.Template.Spec, changes)
+		if err != nil {
+			return false, err
+		}
+		if !canUpdate {
+			log.V(4).Info("Machine cannot be updated in-place, will fallback to rolling update",
+				"machine", machine.Name)
+			return false, nil
+		}
+	}
+
+	log.V(4).Info("All MachineDeployment machines can be updated in-place using external updaters",
+		"machineCount", len(allMachines))
+	return true, nil
+}
+
+func (r *Reconciler) executeExternalUpdateStrategy(ctx context.Context, oldMSs []*clusterv1.MachineSet, newMS *clusterv1.MachineSet) error {
+	log := ctrl.LoggerFrom(ctx)
+
+	changes, err := r.calculateMachineSpecChanges(&clusterv1.Machine{Spec: oldMSs[0].Spec.Template.Spec}, newMS.Spec.Template.Spec)
+	if err != nil {
+		return err
+	}
+
+	var movedMachines int32 = 0
+
+	for _, ms := range oldMSs {
+		if err := r.pauseMachineSet(ctx, ms, "external-update-in-progress"); err != nil {
+			return errors.Wrapf(err, "failed to pause old MachineSet %s", ms.Name)
+		}
+
+		machines, err := r.getMachinesForMachineSet(ctx, ms)
+		if err != nil {
+			return err
+		}
+
+		var machinesToProcess []*clusterv1.Machine
+		allMachinesAlreadyPending := true
+
+		for _, machine := range machines {
+			latestMachine := &clusterv1.Machine{}
+			if err := r.Client.Get(ctx, client.ObjectKeyFromObject(machine), latestMachine); err != nil {
+				return errors.Wrapf(err, "failed to get latest machine state for %s", machine.Name)
+			}
+
+			if hooks.IsPending(runtimehooksv1.ExternalUpdate, latestMachine) {
+				log.V(5).Info("Machine is already pending external update, skipping",
+					"machine", machine.Name)
+			} else {
+				machinesToProcess = append(machinesToProcess, machine)
+				allMachinesAlreadyPending = false
+			}
+		}
+
+		if allMachinesAlreadyPending && len(machines) > 0 {
+			log.V(5).Info("All machines in MachineSet are already pending external update",
+				"machineSet", ms.Name, "machineCount", len(machines))
+			continue
+		}
+
+		for _, machine := range machinesToProcess {
+			if err := r.markMachineForExternalUpdateAndMove(ctx, machine, newMS, ms, changes); err != nil {
+				return err
+			}
+			movedMachines++
+		}
+
+		// Scale down the old MachineSet as machines are moved to the new one
+		if *ms.Spec.Replicas > 0 {
+			replicas := *ms.Spec.Replicas - int32(len(machines))
+			if replicas < 0 {
+				replicas = 0
+			}
+
+			patchHelper, err := patch.NewHelper(ms, r.Client)
+			if err != nil {
+				return err
+			}
+			ms.Spec.Replicas = &replicas
+			if err := patchHelper.Patch(ctx, ms); err != nil {
+				return err
+			}
+		}
+
+		if err := r.unpauseMachineSet(ctx, ms); err != nil {
+			log.Error(err, "Failed to unpause old MachineSet after external update", "machineSet", ms.Name)
+		}
+	}
+
+	if err := r.unpauseMachineSet(ctx, newMS); err != nil {
+		return errors.Wrapf(err, "failed to unpause new MachineSet %s after external update", newMS.Name)
+	}
+
+	log.Info("Successfully moved machines to new MachineSet for external update", "movedMachines", movedMachines, "newMachineSet", newMS.Name)
+	return nil
+}
+
+func (r *Reconciler) canMachineUseExternalUpdate(ctx context.Context, machine *clusterv1.Machine, newSpec clusterv1.MachineSpec, changes []string) (bool, error) {
+	log := ctrl.LoggerFrom(ctx)
+
+	if r.RuntimeClient == nil {
+		log.V(5).Info("RuntimeClient not configured, falling back to rolling update for machine", "machine", machine.Name)
+		return false, errors.New("RuntimeClient not configured, cannot use external update for machine")
+	}
+
+	canUpdateRequest := &runtimehooksv1.CanUpdateMachineRequest{
+		Changes: changes,
+	}
+
+	canUpdateResponse := &runtimehooksv1.CanUpdateMachineResponse{}
+	if err := r.RuntimeClient.CallAllExtensions(ctx, runtimehooksv1.CanUpdateMachine, machine, canUpdateRequest, canUpdateResponse); err != nil {
+		log.Error(err, "Failed to call CanUpdateMachine hook for machine", "machine", machine.Name)
+		return false, errors.New("failed to call CanUpdateMachine hook for machine")
+	}
+
+	acceptedChangesSet := make(map[string]bool)
+
+	var acceptedChanges []string
+	if message := canUpdateResponse.GetMessage(); message != "" {
+		acceptedChanges = strings.Split(message, ",")
+	}
+
+	for _, change := range acceptedChanges {
+		acceptedChangesSet[change] = true
+	}
+
+	var missingChanges []string
+	for _, requiredChange := range changes {
+		if !acceptedChangesSet[requiredChange] {
+			missingChanges = append(missingChanges, requiredChange)
+		}
+	}
+
+	if len(missingChanges) > 0 {
+		log.V(4).Info("External updaters cannot handle all required changes for machine",
+			"machine", machine.Name,
+			"requestedChanges", changes,
+			"acceptedChanges", acceptedChanges,
+			"missingChanges", missingChanges,
+			"responseMessage", canUpdateResponse.GetMessage())
+		return false, nil
+	}
+
+	log.V(4).Info("External updaters can handle all required changes for machine",
+		"machine", machine.Name,
+		"requestedChanges", changes,
+		"acceptedChanges", acceptedChanges,
+		"responseMessage", canUpdateResponse.GetMessage())
+	return true, nil
+}
+
+func (r *Reconciler) markMachineForExternalUpdateAndMove(ctx context.Context, machine *clusterv1.Machine, newMS *clusterv1.MachineSet, oldMS *clusterv1.MachineSet, changes []string) error {
+	log := ctrl.LoggerFrom(ctx)
+
+	patchHelper, err := patch.NewHelper(machine, r.Client)
+	if err != nil {
+		log.Error(err, "Failed to create patch helper for machine", "machine", machine.Name)
+		return err
+	}
+
+	if machine.Annotations == nil {
+		machine.Annotations = make(map[string]string)
+	}
+	machine.Annotations[clusterv1.ExternalUpdateChangesAnnotation] = strings.Join(changes, ",")
+
+	for _, change := range changes {
+		switch change {
+		case "machine.spec.version":
+			machine.Spec.Version = newMS.Spec.Template.Spec.Version
+		// Add other supported fields here as needed in the future
+		default:
+			log.Info("Skipping unsupported change during external update", "change", change)
+		}
+	}
+
+	for i, ownerRef := range machine.OwnerReferences {
+		if ownerRef.UID == oldMS.UID {
+			machine.OwnerReferences = append(machine.OwnerReferences[:i], machine.OwnerReferences[i+1:]...)
+			break
+		}
+	}
+
+	newOwnerRef := metav1.OwnerReference{
+		APIVersion: newMS.APIVersion,
+		Kind:       newMS.Kind,
+		Name:       newMS.Name,
+		UID:        newMS.UID,
+		Controller: ptr.To(true),
+	}
+	machine.OwnerReferences = append(machine.OwnerReferences, newOwnerRef)
+
+	if machine.Labels == nil {
+		machine.Labels = make(map[string]string)
+	}
+	for key, value := range newMS.Spec.Template.Labels {
+		machine.Labels[key] = value
+	}
+
+	if err := patchHelper.Patch(ctx, machine); err != nil {
+		log.Error(err, "Failed to patch machine with spec and changes annotation", "machine", machine.Name)
+		return err
+	}
+
+	if err := hooks.MarkAsPending(ctx, r.Client, machine, runtimehooksv1.ExternalUpdate); err != nil {
+		log.Error(err, "Failed to mark machine for external update", "machine", machine.Name)
+		return err
+	}
+
+	log.Info("Marked machine for external update and moved to new MachineSet",
+		"machine", machine.Name, "oldMachineSet", oldMS.Name, "newMachineSet", newMS.Name, "changes", changes)
+
+	return nil
+}
+
+func (r *Reconciler) pauseMachineSet(ctx context.Context, ms *clusterv1.MachineSet, reason string) error {
+	log := ctrl.LoggerFrom(ctx)
+
+	if annotations.HasPaused(ms) {
+		return nil
+	}
+
+	patchHelper, err := patch.NewHelper(ms, r.Client)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create patch helper for MachineSet %s", ms.Name)
+	}
+
+	if ms.Annotations == nil {
+		ms.Annotations = make(map[string]string)
+	}
+	ms.Annotations[clusterv1.PausedAnnotation] = reason
+
+	if err := patchHelper.Patch(ctx, ms); err != nil {
+		return errors.Wrapf(err, "failed to pause MachineSet %s", ms.Name)
+	}
+
+	log.Info("Paused MachineSet for external update", "machineSet", ms.Name, "reason", reason)
+	return nil
+}
+
+func (r *Reconciler) unpauseMachineSet(ctx context.Context, ms *clusterv1.MachineSet) error {
+	log := ctrl.LoggerFrom(ctx)
+
+	if !annotations.HasPaused(ms) {
+		return nil
+	}
+
+	patchHelper, err := patch.NewHelper(ms, r.Client)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create patch helper for MachineSet %s", ms.Name)
+	}
+
+	if ms.Annotations != nil {
+		delete(ms.Annotations, clusterv1.PausedAnnotation)
+	}
+
+	if err := patchHelper.Patch(ctx, ms); err != nil {
+		return errors.Wrapf(err, "failed to unpause MachineSet %s", ms.Name)
+	}
+
+	log.Info("Unpaused MachineSet after external update", "machineSet", ms.Name)
 	return nil
 }

@@ -162,6 +162,11 @@ const (
 	// External infrastructure providers should ensure that the annotation, once set, cannot be removed.
 	ManagedByAnnotation = "cluster.x-k8s.io/managed-by"
 
+	// ExternalUpdateChangesAnnotation stores the list of changes that external updaters need to handle.
+	// This annotation is set by controllers (like KCP) when marking machines for external updates
+	// and contains a comma-separated list of change paths (e.g., "machine.spec.version").
+	ExternalUpdateChangesAnnotation = "cluster.x-k8s.io/external-update-changes"
+
 	// TopologyDryRunAnnotation is an annotation that gets set on objects by the topology controller
 	// only during a server side dry run apply operation. It is used for validating
 	// update webhooks for objects which get updated by template rotation (e.g. InfrastructureMachineTemplate).

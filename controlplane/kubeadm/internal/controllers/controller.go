@@ -44,10 +44,13 @@ import (
 	bootstrapv1 "sigs.k8s.io/cluster-api/api/bootstrap/kubeadm/v1beta2"
 	controlplanev1 "sigs.k8s.io/cluster-api/api/controlplane/kubeadm/v1beta2"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	runtimehooksv1 "sigs.k8s.io/cluster-api/api/runtime/hooks/v1alpha1"
 	"sigs.k8s.io/cluster-api/controllers/clustercache"
 	"sigs.k8s.io/cluster-api/controlplane/kubeadm/internal"
+	runtimeclient "sigs.k8s.io/cluster-api/exp/runtime/client"
 	"sigs.k8s.io/cluster-api/feature"
 	"sigs.k8s.io/cluster-api/internal/contract"
+	"sigs.k8s.io/cluster-api/internal/hooks"
 	"sigs.k8s.io/cluster-api/internal/util/ssa"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/collections"
@@ -79,6 +82,8 @@ const (
 type KubeadmControlPlaneReconciler struct {
 	Client              client.Client
 	SecretCachingClient client.Client
+	APIReader           client.Reader
+	RuntimeClient       runtimeclient.Client
 	controller          controller.Controller
 	recorder            record.EventRecorder
 	ClusterCache        clustercache.ClusterCache
@@ -961,11 +966,23 @@ func (r *KubeadmControlPlaneReconciler) reconcileControlPlaneAndMachinesConditio
 	return nil
 }
 
-func reconcileMachineUpToDateCondition(_ context.Context, controlPlane *internal.ControlPlane) {
+func reconcileMachineUpToDateCondition(ctx context.Context, controlPlane *internal.ControlPlane) {
+	log := ctrl.LoggerFrom(ctx)
 	machinesNotUptoDate, machinesNotUptoDateConditionMessages := controlPlane.NotUpToDateMachines()
 	machinesNotUptoDateNames := sets.New(machinesNotUptoDate.Names()...)
 
 	for _, machine := range controlPlane.Machines {
+		if hooks.IsPending(runtimehooksv1.ExternalUpdate, machine) {
+			log.V(4).Info("Machine external update in progress", "machine", machine.Name)
+			conditions.Set(machine, metav1.Condition{
+				Type:    clusterv1.MachineUpToDateCondition,
+				Status:  metav1.ConditionFalse,
+				Reason:  "ExternalUpdateInProgress",
+				Message: "External update in progress",
+			})
+			continue
+		}
+
 		if machinesNotUptoDateNames.Has(machine.Name) {
 			// Note: the code computing the message for KCP's RolloutOut condition is making assumptions on the format/content of this message.
 			message := ""

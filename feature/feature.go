@@ -77,6 +77,9 @@ const (
 	//
 	// alpha: v1.10
 	PriorityQueue featuregate.Feature = "PriorityQueue"
+
+	// InPlaceUpdates is a feature gate for the in-place machine updates functionality.
+	InPlaceUpdates featuregate.Feature = "InPlaceUpdates"
 )
 
 func init() {
@@ -95,4 +98,5 @@ var defaultClusterAPIFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 	ClusterTopology:                {Default: false, PreRelease: featuregate.Alpha},
 	KubeadmBootstrapFormatIgnition: {Default: false, PreRelease: featuregate.Alpha},
 	RuntimeSDK:                     {Default: false, PreRelease: featuregate.Alpha},
+	InPlaceUpdates:                 {Default: false, PreRelease: featuregate.Alpha},
 }

@@ -45,12 +45,9 @@ type CanUpdateMachineResponse struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// CommonResponse contains Status and Message fields common to all response types.
+	// Extensions should include accepted changes directly in the Message field as comma-separated values:
+	// "change1,change2,change3" or empty string if no changes can be handled.
 	CommonResponse `json:",inline"`
-
-	// acceptedChanges is the subset of requested changes that this extension can handle.
-	// If empty, the extension cannot handle any of the requested changes.
-	// +optional
-	AcceptedChanges []string `json:"acceptedChanges,omitempty"`
 }
 
 // CanUpdateMachine is the hook that will be called to determine if an extension
@@ -103,12 +100,21 @@ type ObjectReference struct {
 // until it reports Done or Failed status.
 func UpdateMachine(*UpdateMachineRequest, *UpdateMachineResponse) {}
 
+// ExternalUpdate is the lifecycle hook for in-place updates.
+// This is the hook name used in the PendingHooksAnnotation to mark machines for external updates.
+func ExternalUpdate(*UpdateMachineRequest, *UpdateMachineResponse) {}
+
 func init() {
 	catalogBuilder.RegisterHook(CanUpdateMachine, &runtimecatalog.HookMeta{
 		Tags:    []string{"In-Place Update Hooks"},
 		Summary: "Cluster API Runtime will call this hook to determine if an extension can handle specific machine changes",
 		Description: "Called during update planning to determine if an extension can handle machine changes. " +
 			"The extension should respond with the subset of changes it can handle for in-place updates.\n" +
+			"\n" +
+			"Response Communication:\n" +
+			"- Include accepted changes directly in Message field as comma-separated values\n" +
+			"- Example: 'machine.spec.version,infraMachine.spec.memoryMiB'\n" +
+			"- If no changes can be handled, set Message to empty string\n" +
 			"\n" +
 			"Notes:\n" +
 			"- This hook is called during the planning phase of updates\n" +
@@ -129,5 +135,17 @@ func init() {
 			"- The hook should return InProgress status while the update is ongoing\n" +
 			"- Use RetryAfterSeconds to control polling frequency\n" +
 			"- The hook should perform updates based on the current machine spec\n",
+	})
+
+	catalogBuilder.RegisterHook(ExternalUpdate, &runtimecatalog.HookMeta{
+		Tags:    []string{"In-Place Update Hooks"},
+		Summary: "Lifecycle hook for marking machines pending external updates",
+		Description: "This hook represents the lifecycle state for machines marked for external updates. " +
+			"Used in the PendingHooksAnnotation to signal the Machine controller to execute UpdateMachine hooks.\n" +
+			"\n" +
+			"Notes:\n" +
+			"- This is a lifecycle hook, not a callable hook\n" +
+			"- Used as a marker in annotations to track update state\n" +
+			"- The actual updates are performed via UpdateMachine hooks\n",
 	})
 }

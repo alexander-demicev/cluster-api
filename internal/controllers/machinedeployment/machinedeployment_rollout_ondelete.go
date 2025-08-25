@@ -33,7 +33,7 @@ import (
 
 // rolloutOnDelete implements the logic for the OnDelete rollout strategy.
 func (r *Reconciler) rolloutOnDelete(ctx context.Context, md *clusterv1.MachineDeployment, msList []*clusterv1.MachineSet, templateExists bool) error {
-	newMS, oldMSs, err := r.getAllMachineSetsAndSyncRevision(ctx, md, msList, true, templateExists)
+	newMS, oldMSs, err := r.getAllMachineSetsAndSyncRevision(ctx, md, msList, true, templateExists, false)
 	if err != nil {
 		return err
 	}
