@@ -136,7 +136,7 @@ func (r *CommonRetryResponse) SetRetryAfterSeconds(retryAfterSeconds int32) {
 }
 
 // PatchType defines the supported patch types.
-// +enum
+// +kubebuilder:validation:Enum=JSONPatch;JSONMergePatch
 type PatchType string
 
 const (
